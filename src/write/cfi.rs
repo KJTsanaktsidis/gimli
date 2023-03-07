@@ -164,7 +164,7 @@ impl CommonInformationEntry {
     }
 
     /// Returns the section offset of the CIE.
-    fn write<W: Writer>(&self, w: &mut W, eh_frame: bool) -> Result<usize> {
+    pub fn write<W: Writer>(&self, w: &mut W, eh_frame: bool) -> Result<usize> {
         let encoding = self.encoding;
         let offset = w.len();
 
@@ -302,7 +302,7 @@ impl FrameDescriptionEntry {
         self.instructions.push((offset, instruction));
     }
 
-    fn write<W: Writer>(
+    pub fn write<W: Writer>(
         &self,
         w: &mut W,
         eh_frame: bool,

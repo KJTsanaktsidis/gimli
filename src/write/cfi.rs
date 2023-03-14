@@ -60,17 +60,23 @@ impl FrameTable {
 
     /// Write the frame table entries to the given `.debug_frame` section.
     pub fn write_debug_frame<W: Writer>(&self, w: &mut DebugFrame<W>) -> Result<()> {
-        self.write(&mut w.0, false)
+        self.write(&mut w.0, false, 0).and(Ok(()))
     }
 
     /// Write the frame table entries to the given `.eh_frame` section.
     pub fn write_eh_frame<W: Writer>(&self, w: &mut EhFrame<W>) -> Result<()> {
-        self.write(&mut w.0, true)
+        self.write(&mut w.0, true, 0).and(Ok(()))
     }
 
-    fn write<W: Writer>(&self, w: &mut W, eh_frame: bool) -> Result<()> {
+    /// Writes the unwritten frame table entries to the given .eh_frame section,
+    /// starting from the FDE at the given index
+    pub fn write_eh_frame_from<W: Writer>(&self, w: &mut EhFrame<W>, from: usize) -> Result<usize> {
+        self.write(&mut w.0, true, from)
+    }
+
+    fn write<W: Writer>(&self, w: &mut W, eh_frame: bool, from: usize) -> Result<usize> {
         let mut cie_offsets = vec![None; self.cies.len()];
-        for (cie_id, fde) in &self.fdes {
+        for (cie_id, fde) in &self.fdes[from..] {
             let cie_index = cie_id.index;
             let cie = self.cies.get_index(cie_index).unwrap();
             let cie_offset = match cie_offsets[cie_index] {
@@ -86,7 +92,21 @@ impl FrameTable {
             fde.write(w, eh_frame, cie_offset, cie)?;
         }
         // TODO: write length 0 terminator for eh_frame?
-        Ok(())
+        Ok(self.fdes.len())
+    }
+
+    /// Retains only FDE's that match the predicate, removing others from the table
+    ///
+    /// # Panics
+    ///
+    /// Panics if the CIE id is invalid.
+    pub fn retain_fdes<F>(&mut self, mut pred: F) where
+        F: FnMut(&CommonInformationEntry, &FrameDescriptionEntry) -> bool
+    {
+        let cies = &self.cies;
+        self.fdes.retain(|(cie_id, fde)| {
+            pred(cies.get_index(cie_id.index).unwrap(), fde)
+        });
     }
 }
 
@@ -164,7 +184,7 @@ impl CommonInformationEntry {
     }
 
     /// Returns the section offset of the CIE.
-    pub fn write<W: Writer>(&self, w: &mut W, eh_frame: bool) -> Result<usize> {
+    fn write<W: Writer>(&self, w: &mut W, eh_frame: bool) -> Result<usize> {
         let encoding = self.encoding;
         let offset = w.len();
 
@@ -302,7 +322,17 @@ impl FrameDescriptionEntry {
         self.instructions.push((offset, instruction));
     }
 
-    pub fn write<W: Writer>(
+    /// Gets the address of the code described by this FDE
+    pub fn address(&self) -> Address {
+        self.address
+    }
+
+    /// Gets the length of the code described by this FDE
+    pub fn length(&self) -> u32 {
+        self.length
+    }
+
+    fn write<W: Writer>(
         &self,
         w: &mut W,
         eh_frame: bool,
